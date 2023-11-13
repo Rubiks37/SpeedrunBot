@@ -29,7 +29,7 @@ class SrcTable:
 
 # represents all game's runs that are in config
 class RunTable(SrcTable):
-    TABLE_COLS = ('run_id', 'game_id', 'runner', 'date', 'rta', 'igt', 'category', 'variable', 'verifier', 'verify_date')
+    TABLE_COLS = ('run_id', 'game_id', 'player', 'date', 'rta', 'igt', 'category', 'variable', 'verifier', 'verify_date')
 
     def __init__(self, conn: sqlite3.Connection):
         super().__init__(conn)
@@ -41,7 +41,7 @@ class RunTable(SrcTable):
 
     """
     each game has a table. the table will look like this:
-    run_id - game_id - runner - date - rta - igt - category - variable - verifier - verify_date
+    run_id - game_id - player - date - rta - igt - category - variable - verifier - verify_date
     run_id is the id of the run (also the primary key)
     game_id is the id of the game the run was done in
     runner is the runners id
@@ -74,14 +74,14 @@ class RunTable(SrcTable):
     def insert_single_run(self, row: tuple):
         query = f'''
         INSERT INTO runs
-        (run_id, game_id, runner, date, rta, igt, category, variable, verifier, verify_date) 
+        (run_id, game_id, player, date, rta, igt, category, variable, verifier, verify_date) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *'''
         return self(query, row)
 
     def insert_multiple_runs(self, rows: list):
         query = f'''
         INSERT INTO runs
-        (run_id, game_id, runner, date, rta, igt, category, variable, verifier, verify_date) 
+        (run_id, game_id, player, date, rta, igt, category, variable, verifier, verify_date) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *'''
         return self.executemany(query, rows)
 
@@ -90,7 +90,7 @@ class RunTable(SrcTable):
         cursor = self.conn.cursor()
         query = f'''
         INSERT INTO runs
-        (run_id, game_id, runner, date, rta, igt, category, variable, verifier, verify_date) 
+        (run_id, game_id, player, date, rta, igt, category, variable, verifier, verify_date) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *'''
         ids = []
         for i, run in enumerate(rows):
