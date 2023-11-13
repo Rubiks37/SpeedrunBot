@@ -30,6 +30,8 @@ class SrcTable:
 # represents all game's runs that are in config
 class RunTable(SrcTable):
     TABLE_COLS = ('run_id', 'game_id', 'player', 'date', 'rta', 'igt', 'category', 'variable', 'verifier', 'verify_date')
+    CHECK_NULL = ('check_null', 'check_not_null')
+    VALID_KWARGS = TABLE_COLS + CHECK_NULL
 
     def __init__(self, conn: sqlite3.Connection):
         super().__init__(conn)
@@ -114,7 +116,7 @@ class RunTable(SrcTable):
         keys = [f'{key} = ?' for key in kwargs]
         query = f'''SELECT * FROM runs'''
         if kwargs:
-            query += f'''WHERE {' AND '.join(keys)}'''
+            query += f''' WHERE {' AND '.join(keys)}'''
         params = tuple(kwargs.values()) if kwargs else tuple()
         return self(query, params)
 
@@ -123,8 +125,31 @@ class RunTable(SrcTable):
         if set(args) - set(self.TABLE_COLS):
             raise ValueError('error: keyword not found in table')
 
-        query = '''SELECT {', '.join(args)} FROM runs'''
+        query = f'''SELECT {', '.join(args)} FROM runs'''
         return self(query)
+
+    def select_row_col(self, *args, **kwargs):
+
+        invalid_args = set(args) - set(self.TABLE_COLS)
+        invalid_args.update(set(kwargs) - set(self.VALID_KWARGS))
+        invalid_args.update(set(kwargs.get('check_null', [])) - set(self.TABLE_COLS))
+        invalid_args.update(set(kwargs.get('check_not_null', [])) - set(self.TABLE_COLS))
+
+        if invalid_args:
+            raise ValueError('error: keyword not found in table')
+
+        conditions = []
+        conditions.extend([f'{key} = ?' for key in kwargs if kwargs[key] and key not in self.CHECK_NULL])
+        conditions.extend([f'{key} IS NULL' for key in kwargs.get('check_null', ())])
+        conditions.extend([f'{key} IS NOT NULL' for key in kwargs.get('check_not_null', ())])
+
+        query = f'''SELECT {', '.join(args)} FROM runs'''
+
+        if conditions:
+            query += f''' WHERE {' AND '.join(conditions)}'''
+
+        params = tuple(value for key, value in kwargs.items() if value and key not in self.CHECK_NULL)
+        return self(query, params)
 
     # kwargs will have to be in self.TABLE_COLS. the only condition that won't be updated about a run is its id.
     # if another kwarg is set, it will be updated
@@ -154,9 +179,10 @@ class RunTable(SrcTable):
         return True
 
 
-# honestly this is pretty much the same thing as the table above, i just didn't feel like configuring it to be dynamic.
 class VariableTable(SrcTable):
     TABLE_COLS = ('variable_id', 'var_name', 'var_values')
+    CHECK_NULL = ('check_null', 'check_not_null')
+    VALID_KWARGS = TABLE_COLS + CHECK_NULL
 
     def __init__(self, conn):
         super().__init__(conn)
@@ -196,7 +222,7 @@ class VariableTable(SrcTable):
         keys = [f'{key} = ?' for key in kwargs]
         query = f'''SELECT * FROM variables'''
         if kwargs:
-            query += f'''WHERE {' AND '.join(keys)}'''
+            query += f''' WHERE {' AND '.join(keys)}'''
         params = tuple(kwargs.values())
         return self(query, params)
 
@@ -206,6 +232,29 @@ class VariableTable(SrcTable):
             raise ValueError('error: keyword not found in table')
 
         return self(f'''SELECT {', '.join(args)} FROM variables''')
+
+    def select_row_col(self, *args, **kwargs):
+
+        invalid_args = set(args) - set(self.TABLE_COLS)
+        invalid_args.update(set(kwargs) - set(self.VALID_KWARGS))
+        invalid_args.update(set(kwargs.get('check_null', [])) - set(self.TABLE_COLS))
+        invalid_args.update(set(kwargs.get('check_not_null', [])) - set(self.TABLE_COLS))
+
+        if invalid_args:
+            raise ValueError('error: keyword not found in table')
+
+        conditions = []
+        conditions.extend([f'{key} = ?' for key in kwargs if kwargs[key] and key not in self.CHECK_NULL])
+        conditions.extend([f'{key} IS NULL' for key in kwargs.get('check_null', ())])
+        conditions.extend([f'{key} IS NOT NULL' for key in kwargs.get('check_not_null', ())])
+
+        query = f'''SELECT {', '.join(args)} FROM variables'''
+
+        if conditions:
+            query += f''' WHERE {' AND '.join(conditions)}'''
+
+        params = tuple(value for key, value in kwargs.items() if value and key not in self.CHECK_NULL)
+        return self(query, params)
 
     def delete_row(self, run_id: str):
         query = f'''DELETE FROM runs WHERE run_id = ? RETURNING *'''
@@ -217,12 +266,7 @@ class VariableTable(SrcTable):
 
     # DONT EVER DO THIS ITS A TERRIBLE IDEA
     def execute(self, statement):
-        cursor = self.conn.cursor()
-        cursor.execute(statement)
-        data = cursor.fetchall()
-        cursor.close()
-        self.conn.commit()
-        return data
+        return self(statement)
 
     def resync_table(self, new_rows: list):
         self.clear_table()
