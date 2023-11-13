@@ -1,0 +1,12 @@
+*.db
+*.db-jounral
+
+.idea/
+venv/
+__pycache__/
+.vs/
+
+/config.py
+/test.py
+/dump.json
+/notes.txt
