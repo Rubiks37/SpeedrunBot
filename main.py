@@ -82,12 +82,12 @@ def get_wr():
     pass
 
 
-def get_verified(verifier_id):
-    pass
+def get_num_verified(verifier_id=None, game_id=None):
+    return len([run for run in runs_table.select_row_col('run_id', game_id=game_id, verifier=verifier_id, check_not_null=['''verify_date'''])])
 
 
-def get_length_runs(runs):
-    pass
+def get_length_runs(game_id: str = ''):
+    return sum(time.get('igt') for time in runs_table.select_row_col('igt', game_id=game_id))
 
 
 @debounce
