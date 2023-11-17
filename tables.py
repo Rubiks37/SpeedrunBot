@@ -16,22 +16,26 @@ class BaseTable:
         self.PRIMARY_KEY = primary_key
         self.create_table()
 
-    def __call__(self, query, input_row: tuple = tuple()):
-        print(query)
+    def __call__(self, query, input_row: tuple = tuple(), error_handle_graceful: bool = False):
         cursor = self.conn.cursor()
         try:
             cursor.execute(query, input_row)
         except sqlite3.Error as error:
-            raise ValueError('error: could not properly select from table\nquery: ' + query + '\nparams:' + str(input_row) + '\nerror: ' + str(error))
+            if error_handle_graceful:
+                print('ignoring exception\nquery: ' + query + '\nparams:' + str(input_row) + '\nerror: ' + str(error))
+            else:
+                raise ValueError('error: could not properly select from table\nquery: ' + query + '\nparams:' + str(input_row) + '\nerror: ' + str(error))
         data = cursor.fetchall()
         cursor.close()
         self.conn.commit()
         return data
 
     def executemany(self, query, input_rows: list):
-        print(query)
         cursor = self.conn.cursor()
-        cursor.executemany(query, input_rows)
+        try:
+            cursor.executemany(query, input_rows)
+        except sqlite3.Error as error:
+            raise ValueError('error: could not properly select from table\nquery:', query, '\nerror:', str(error))
         data = cursor.fetchall()
         cursor.close()
         self.conn.commit()
@@ -61,14 +65,23 @@ class BaseTable:
     def select_row_col(self, cols: list = None, where_conds: list = None):
 
         if not cols:
-            cols = ('*',)
+            cols = ['*']
 
-        conditions = [where_cond() for where_cond in where_conds]
+        conditions = [where_cond() for where_cond in where_conds] if where_conds else []
         query = f'''SELECT {', '.join(cols)} FROM {self.NAME}'''
         if conditions:
             query += f''' WHERE {' AND '.join(conditions)}'''
 
-        params = tuple(arg.value for arg in where_conds)
+        params = tuple(arg.value for arg in where_conds) if where_conds else ()
+        return self(query, params)
+
+    # so this function will take in a current keyword and search the columns for this keyword and return matches
+    def search_table(self, current: str, cols: list = None):
+        if not cols:
+            cols = ['*']
+        where_conditions = [f'{col} LIKE ?' for col in self.COLS]
+        query = f'''SELECT {', '.join(cols)} FROM {self.NAME} WHERE ''' + ' OR '.join(where_conditions)
+        params = (f'%{current}%',) * len(self.COLS)
         return self(query, params)
 
     # kwargs will have to be in self.TABLE_COLS. the only condition that won't be updated about a run is its id.
@@ -89,8 +102,12 @@ class BaseTable:
     def clear_table(self):
         return self(f'''DELETE FROM {self.NAME}''')
 
+    def drop_table(self):
+        return self(f'''DROP TABLE IF EXISTS {self.NAME}''')
+
     def resync_table(self, new_rows: list):
-        self.clear_table()
+        self.drop_table()
+        self.create_table()
         self.insert_multiple_runs(new_rows)
         return True
 
@@ -135,6 +152,8 @@ class MasterTable(BaseTable):
             'player_name',
             'rta',
             'igt',
+            'run_video',
+            'comment',
             'category_id',
             'category_name',
             'variable_id',
@@ -142,27 +161,29 @@ class MasterTable(BaseTable):
             'verifier_info',
             'verifier_name',
             'verify_date',
-            'status'
+            'status',
+            'reason'
         )
         col_types = (
             'VARCHAR(25)',
             'VARCHAR(25)',
             'VARCHAR(25)',
             'date',
-            'players',
+            'users',
             'VARCHAR(25)',
             'REAL',
             'REAL',
-            'VARCHAR(25)',
+            'VARCHAR(255)',
+            'TEXT',
             'VARCHAR(25)',
             'VARCHAR(25)',
             'VARCHAR(25)',
             'json',
-            'VARCHAR(25)',
-            'VARCHAR(25)',
+            'users',
             'VARCHAR(25)',
             'date',
-            'VARCHAR(25)'
+            'VARCHAR(25)',
+            'TEXT'
         )
         name = 'runs_master'
         primary_key = 'run_id'
