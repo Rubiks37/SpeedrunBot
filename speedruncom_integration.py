@@ -175,12 +175,14 @@ def parse_call_into_master_row(run: dict,
     times = run.get('times')
     rta = times.get('realtime_t')
     igt = times.get('ingame_t') if times.get('ingame_t') != 0 else rta
+    run_video = next(iter(run.get('videos').get('links', [])), {}).get('uri')
+    comment = run.get('comment')
     category = run.get('category')
     category_row = next(iter(category_table.select_row_col(cols=['name'], where_conds=[WhereCond('category_id', '=', category)])), None)
     category_name = category_row.get('name') if category_row else None
     variables = run.get('values')
     variable_rows = [variable_table.select_row_col(
-            cols=[f'''var_name, JSON_EXTRACT(var_values, '$.{variables[variable]}') AS 'var_values' '''],
+            cols=['''var_name''', f'''JSON_EXTRACT(var_values, '$.{variables[variable]}') AS 'var_values' '''],
             where_conds=[WhereCond('variable_id', '=', variable)])[0] for variable in variables]
     variables_info = {variable.get('var_name'): variable.get('var_values') for variable in variable_rows}
     status_dict = run.get('status')
@@ -190,6 +192,7 @@ def parse_call_into_master_row(run: dict,
     verifier_name = verifier_info.get_value('user_name')[0] if verifier_row else None
     verify_date = date.fromisoformat(status_dict.get('verify-date')[:10]) if status_dict.get('verify-date') else None
     status = status_dict.get('status')
+    reason = status_dict.get('reason')
     return (
         run_id,
         game_id,
@@ -199,6 +202,8 @@ def parse_call_into_master_row(run: dict,
         users_name,
         rta,
         igt,
+        run_video,
+        comment,
         category,
         category_name,
         variables,
@@ -206,5 +211,6 @@ def parse_call_into_master_row(run: dict,
         verifier_info,
         verifier_name,
         verify_date,
-        status
+        status,
+        reason
     )
