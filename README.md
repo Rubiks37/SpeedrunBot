@@ -9,7 +9,8 @@ A discord bot that uses speedrun.com's API to cache runs from a specified set of
 ---
 
 * Creates SQLite tables to store runs based on config
-* There are like no commands now, but I swear im working on it
+* Get any run in detail
+* There are like no commands now, but I swear im working on it; its hard work
 * All commands can filter based on a number of criteria
 * Supports autocomplete
 
@@ -35,4 +36,3 @@ so this initial version is a very rough version of what I want the bot to be in 
 * Get number of runs
 * Get length of runs per game
 * Get current WR in a category
-* Get any run in detail
