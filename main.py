@@ -6,12 +6,11 @@ from discord import app_commands
 import config
 import asyncio
 from traceback import print_exc
-from re import findall
 import tables
 import users
 import speedruncom_integration as src
 from where import WhereCond
-from debounce import Debounce
+import autocomplete as ac
 
 
 # set up all the adapters and converters for the different types of vars used in tables
@@ -35,9 +34,6 @@ user_table = tables.UserTable(conn)
 
 # creates master table to combine all tables into one
 master_table = tables.MasterTable(conn)
-
-# create debounce object
-debounce = Debounce(1)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -100,6 +96,7 @@ def resync_master_user():
 
 
 def resync_all():
+    tables.drop_all_tables(conn)
     resync_categories()
     resync_variables()
     resync_master_user()
@@ -117,36 +114,18 @@ def get_num_verified(*args):
     pass
 
 
-@debounce
-async def autocomplete_get_game(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    return [app_commands.Choice(name=game.get('names').get('international'), value=game.get('id'))
-            for game in src.get_game(name=current).get('data')][:25]
-
-
-async def autocomplete_get_date(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    keywords = {
-        'after': ['After YYYY-MM-DD'],
-        'before': ['Before YYYY-MM-DD'],
-        'on': ['On YYYY-MM-DD'],
-        'between': ['Between YYYY-MM-DD and YYYY-MM-DD'],
-        'last': ['Last # Days', 'Last # Weeks', 'Last # Months', 'Last # Years'],
-        'year': ['Year YYYY']
-    }
-    starts_with = current.lower().split(' ')[0]
-    if starts_with in keywords:
-        values = keywords[starts_with]
-        return [app_commands.Choice(name=val, value=val) for val in values]
-    else:
-        return [app_commands.Choice(name=val, value=val) for key, value in keywords.items() for val in value if current.lower().split(' ')[0] in key]
+def get_run(run_id: str):
+    run_id_where = WhereCond('run_id', '=', run_id)
+    return next(iter(master_table.select_row_col(where_conds=[run_id_where])))
 
 
 @client.event
 async def on_ready():
-    await sync_commands()
+    pass
 
 
 @tree.command(name='get_game', description='find a game\'s id')
-@app_commands.autocomplete(name=autocomplete_get_game)
+@app_commands.autocomplete(name=ac.get_game)
 async def cmd_get_game(interaction: discord.Interaction, name: str):
     try:
         await interaction.response.send_message(content=f'the id is {name}')
@@ -156,10 +135,47 @@ async def cmd_get_game(interaction: discord.Interaction, name: str):
 
 
 @tree.command(name='get_number_of_verified', description='get the total number of verified runs for the games monitored')
-@app_commands.autocomplete(date=autocomplete_get_date)
+@app_commands.autocomplete(date=ac.get_date)
 async def cmd_get_num_verified(interaction: discord.Interaction, date: str = None):
     try:
         await interaction.response.send_message(content=f'num verified is none because i havent implemented this')
+    except Exception as error:
+        print_exc()
+        await interaction.response.send_message(content=error)
+
+
+@tree.command(name='get_run', description='gets a specific run')
+@app_commands.autocomplete(run=ac.get_run(master_table))
+async def cmd_get_run(interaction: discord.Interaction, run: str):
+    try:
+        selected_cols = ['game_name', 'player_info', 'run_date', 'run_video', 'comment', 'rta', 'igt', 'category_name', 'variable_info', 'verifier_info', 'status', 'reason']
+        run = next(iter(master_table.select_row_col(cols=selected_cols, where_conds=[WhereCond('run_id', '=', run)])), [])
+
+        game_name = run.get('game_name')
+        category_name = run.get('category_name')
+        time = ac.format_time(run.get('igt'))
+        player_obj = run.get('player_info')
+        players = f'''**Runners**: {', '.join([f"{player.get('user_name')} (*{player.get('pronouns')}*)" if player.get('pronouns') is not None else f"{player.get('user_name')}" for player in player_obj.users.values()])}'''
+        variables_info = f'''**Subcategory**: {', '.join(run.get('variable_info').values())}'''
+        run_date = f'''**Date of Run**: {run.get('run_date').isoformat()}''' if run.get('run_date') else None
+        comment = f'''**Comment**: {run.get('comment')}\n''' if run.get('comment') else None
+        verifier_obj = run.get('verifier_info')
+        verifier_obj = next(iter(verifier_obj.users.values())) if verifier_obj else {}
+        verifier = '**Verifier**: 'f"{verifier_obj.get('user_name')}" + f" (*{verifier_obj.get('pronouns')}*)" \
+            if verifier_obj.get('pronouns') is not None else f"**Verifier**: {verifier_obj.get('user_name')}" \
+            if verifier_obj.get('user_name') else None
+        status = '**Status**: ' + run.get('status').capitalize() if run.get('status') != 'new' else 'Unverified'
+        reason = '**Reason for Rejection**: ' + run.get('reason') if run.get('reason') else None
+        description = '\n'.join(tuple(value for value in [players, variables_info, run_date, comment, verifier, status, reason] if value))
+
+        video_url = run.get('run_video')
+        profile_picture = next(iter(player_obj.get_value('user_pfp')))
+
+        embed = discord.Embed(title=f'''{game_name} {category_name} in {time}''',
+                              description=description,
+                              url=video_url)
+        embed.set_image(url=profile_picture)
+        await interaction.response.send_message(embed=embed)
     except Exception as error:
         print_exc()
         await interaction.response.send_message(content=error)
@@ -177,8 +193,3 @@ async def sync(interaction: discord.Interaction):
 if __name__ == '__main__':
     client.run(config.TOKEN)
     conn.commit()
-    # games = (src.get_game(name='subnautica category extensions').get('data'))
-
-
-
-
