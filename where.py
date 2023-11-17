@@ -14,6 +14,9 @@ class WhereCond:
     def __call__(self):
         return f'{self.col_mod}({self.col}) {self.operator} ?' if self.col_mod else f'{self.col} {self.operator} ?'
 
+    def __repr__(self):
+        return f'{self.col}, {self.operator}, {self.value}, {self.col_mod}'
+
 
 def get_dates_from_str(string: str):
     # regex of iso8401 dates is /d/d/d/d-/d/d-/d/d
