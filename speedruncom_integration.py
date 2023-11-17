@@ -4,7 +4,9 @@
 from datetime import date
 import requests
 import config
-import players
+import users
+import tables
+from where import WhereCond
 
 header = config.HEADER
 url = 'https://www.speedrun.com/api/v1/'
@@ -20,19 +22,6 @@ def get_game(name: str = '', game_id: str = '') -> dict:
     return response.json()
 
 
-# returns a list containing every run for a given game id.
-# this command should not be run very often since it is api intensive.
-def get_all_runs(game_id: str):
-    runs_url = url + 'runs'
-    params = {
-        'game': game_id,
-        'max': 200,
-        'orderby': 'date',
-        'direction': 'desc'
-    }
-    return duplicate_remover(iterate_through_responses(runs_url, params), 'id')
-
-
 def get_all_variables(game_id: str):
     variables_url = url + f'games/{game_id}/variables'
     params = {
@@ -41,8 +30,33 @@ def get_all_variables(game_id: str):
     return iterate_through_responses(variables_url, params)
 
 
+def get_all_categories(game_id: str):
+    categories_url = url + f'games/{game_id}/categories'
+    params = {
+        'max': 200
+    }
+    categories = iterate_through_responses(categories_url, params)
+    # this seems like the best way to get the game_id attached to the category
+    [category.update({'game_id': game_id}) for category in categories]
+    return categories
+
+
+def get_all_runs_users(game_id: str):
+    runs_url = url + 'runs'
+    params = {
+        'game': game_id,
+        'max': 200,
+        'embed': 'players',
+        'orderby': 'date',
+        'direction': 'desc'
+    }
+    runs = iterate_through_responses(runs_url, params)
+    unique_runs = duplicate_remover(runs, lambda x: x.get('id'))
+    return unique_runs
+
+
 # since the api has a max request, we need to iterate through them sometimes, so this function does that
-def iterate_through_responses(p_url: str, params: dict, limit: int = -1, data_per_request: int = 200):
+def iterate_through_responses(p_url: str, params: dict, limit: int = -1):
     all_responses = []
     while True:
         response = requests.get(p_url, params=params, headers=header)
@@ -66,17 +80,15 @@ def iterate_through_responses(p_url: str, params: dict, limit: int = -1, data_pe
     return all_responses
 
 
-# for some reason, src sometimes fucks up and gives duplicate entries on things that should be unique, like runs,
-# so we check for that and remove them
-def duplicate_remover(responses, unique):
-    unique_responses = []
-    unique_values = set()
-    for response in responses:
-        value = response.get(unique)
-        if value not in unique_values:
-            unique_responses.append(response)
-            unique_values.add(value)
-    return unique_responses
+def duplicate_remover(entries, primary_key_func):
+    unique = set()
+    unique_entries = []
+    for entry in entries:
+        primary_key = primary_key_func(entry)
+        if primary_key not in unique:
+            unique.add(primary_key)
+            unique_entries.append(entry)
+    return unique_entries
 
 
 # mostly a debugging method to make sure im doing things right
@@ -89,12 +101,13 @@ def get_unverified(game_id: str = ''):
 
 
 # takes the list of players and converts them into the format that my db is storing them in
+# MUST EMBED PLAYERS FOR THIS TO WORK
 def parse_runs_into_rows(runs):
     rows = []
     for run in runs:
         run_id = run.get('id')
         game_id = run.get('game')
-        players_obj = players.get_player_from_run_api(run.get('players'))
+        players_obj = users.get_user_from_run_api(run.get('players').get('data'))
         date_run = date.fromisoformat(run.get('date'))
         times = run.get('times')
         rta = times.get('realtime_t')
@@ -116,3 +129,82 @@ def parse_variables_into_rows(variables):
         values = {key: value.get('label') for key, value in variable.get('values').get('values').items()}
         rows.append((variable_id, name, values))
     return rows
+
+
+def parse_categories_into_rows(categories):
+    category_rows = []
+    for category in categories:
+        category_id = category.get('id')
+        category_name = category.get('name')
+        category_game_id = category.get('game_id')
+        category_rows.append((category_id, category_name, category_game_id))
+    return category_rows
+
+
+def parse_runs_into_users_rows(runs):
+    user_rows = list()
+    for run in runs:
+        data = run.get('players').get('data')
+        for player in data:
+            player_type = player.get('rel')
+            if player_type == 'user':
+                name = player.get('names').get('international')
+                user_id = player.get('id')
+            else:
+                name = player.get('name')
+                user_id = 'guest_' + player.get('name')
+            pronouns = player.get('pronouns')
+            profile_pic = player.get('assets', {}).get('image', {}).get('uri')
+            user_row = (user_id, name, pronouns, player_type, profile_pic)
+            user_rows.append(user_row)
+    user_rows = duplicate_remover(user_rows.copy(), lambda x: x[0])
+    return user_rows
+
+
+def parse_call_into_master_row(run: dict,
+                               category_table: tables.CategoryTable,
+                               variable_table: tables.VariableTable,
+                               user_table: tables.UserTable):
+    run_id = run.get('id')
+    game_id = run.get('game')
+    game_name = config.GAMES.get(game_id)
+    player_data = run.get('players').get('data')
+    users_obj = users.get_user_from_user_embed_api(player_data)
+    users_name = ', '.join(users_obj.get_value('user_name'))
+    date_run = date.fromisoformat(run.get('date'))
+    times = run.get('times')
+    rta = times.get('realtime_t')
+    igt = times.get('ingame_t') if times.get('ingame_t') != 0 else rta
+    category = run.get('category')
+    category_row = next(iter(category_table.select_row_col(cols=['name'], where_conds=[WhereCond('category_id', '=', category)])), None)
+    category_name = category_row.get('name') if category_row else None
+    variables = run.get('values')
+    variable_rows = [variable_table.select_row_col(
+            cols=[f'''var_name, JSON_EXTRACT(var_values, '$.{variables[variable]}') AS 'var_values' '''],
+            where_conds=[WhereCond('variable_id', '=', variable)])[0] for variable in variables]
+    variables_info = {variable.get('var_name'): variable.get('var_values') for variable in variable_rows}
+    status_dict = run.get('status')
+    verifier = status_dict.get('examiner')
+    verifier_row = next(iter(user_table.select_row_col(where_conds=[WhereCond('user_id', '=', verifier)])), None)
+    verifier_info = users.get_user_from_user_row(verifier_row) if verifier_row else None
+    verifier_name = verifier_info.get_value('user_name')[0] if verifier_row else None
+    verify_date = date.fromisoformat(status_dict.get('verify-date')[:10]) if status_dict.get('verify-date') else None
+    status = status_dict.get('status')
+    return (
+        run_id,
+        game_id,
+        game_name,
+        date_run,
+        users_obj,
+        users_name,
+        rta,
+        igt,
+        category,
+        category_name,
+        variables,
+        variables_info,
+        verifier_info,
+        verifier_name,
+        verify_date,
+        status
+    )
