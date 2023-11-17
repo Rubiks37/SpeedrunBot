@@ -3,6 +3,7 @@
 import sqlite3
 from datetime import date
 import users
+from where import WhereCond
 
 
 # base class for all tables later, contains sql calling logic
@@ -188,6 +189,32 @@ class MasterTable(BaseTable):
         name = 'runs_master'
         primary_key = 'run_id'
         super().__init__(conn, name, cols, col_types, primary_key)
+
+    def get_embed_attributes_from_run_id(self, run_id, format_time_func):
+        selected_cols = ['game_name', 'player_info', 'run_date', 'run_video', 'comment', 'rta', 'igt', 'category_name',
+                         'variable_info', 'verifier_info', 'status', 'reason']
+        run = next(iter(self.select_row_col(cols=selected_cols, where_conds=[WhereCond('run_id', '=', run_id)])),[])
+        game_name = run.get('game_name')
+        category_name = run.get('category_name')
+        time = format_time_func(run.get('igt'))
+        player_obj = run.get('player_info')
+        players = f'''**Runners**: {', '.join([f"{player.get('user_name')} (*{player.get('pronouns')}*)" if player.get('pronouns') is not None else f"{player.get('user_name')}" for player in player_obj.users.values()])}'''
+        variables_info = f'''**Subcategory**: {', '.join(run.get('variable_info').values())}'''
+        run_date = f'''**Date of Run**: {run.get('run_date').isoformat()}''' if run.get('run_date') else None
+        comment = f'''**Comment**: {run.get('comment')}\n''' if run.get('comment') else None
+        verifier_obj = run.get('verifier_info')
+        verifier_obj = next(iter(verifier_obj.users.values())) if verifier_obj else {}
+        verifier = '**Verifier**: 'f"{verifier_obj.get('user_name')}" + f" (*{verifier_obj.get('pronouns')}*)" \
+            if verifier_obj.get('pronouns') is not None else f"**Verifier**: {verifier_obj.get('user_name')}" \
+            if verifier_obj.get('user_name') else None
+        status = '**Status**: ' + run.get('status').capitalize() if run.get('status') != 'new' else 'Unverified'
+        reason = '**Reason for Rejection**: ' + run.get('reason') if run.get('reason') else None
+
+        title = f'''{game_name} {category_name} in {time}'''
+        description = '\n'.join(tuple(value for value in [players, variables_info, run_date, comment, verifier, status, reason] if value))
+        video_url = run.get('run_video')
+        profile_picture = next(iter(player_obj.get_value('user_pfp')))
+        return {'title': title, 'description': description, 'video_url': video_url, 'profile_picture': profile_picture}
 
 
 def drop_all_tables(conn: sqlite3.Connection):
