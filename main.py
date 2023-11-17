@@ -102,10 +102,6 @@ def resync_all():
     resync_master_user()
 
 
-def get_master_table():
-    return master_table(conn)
-
-
 def get_wr():
     pass
 
@@ -148,33 +144,12 @@ async def cmd_get_num_verified(interaction: discord.Interaction, date: str = Non
 @app_commands.autocomplete(run=ac.get_run(master_table))
 async def cmd_get_run(interaction: discord.Interaction, run: str):
     try:
-        selected_cols = ['game_name', 'player_info', 'run_date', 'run_video', 'comment', 'rta', 'igt', 'category_name', 'variable_info', 'verifier_info', 'status', 'reason']
-        run = next(iter(master_table.select_row_col(cols=selected_cols, where_conds=[WhereCond('run_id', '=', run)])), [])
+        embed_attributes = (master_table.get_embed_attributes_from_run_id(run, ac.format_time))
+        embed = discord.Embed(title=embed_attributes.get('title'),
+                              description=embed_attributes.get('description'),
+                              url=embed_attributes.get('video_url'))
 
-        game_name = run.get('game_name')
-        category_name = run.get('category_name')
-        time = ac.format_time(run.get('igt'))
-        player_obj = run.get('player_info')
-        players = f'''**Runners**: {', '.join([f"{player.get('user_name')} (*{player.get('pronouns')}*)" if player.get('pronouns') is not None else f"{player.get('user_name')}" for player in player_obj.users.values()])}'''
-        variables_info = f'''**Subcategory**: {', '.join(run.get('variable_info').values())}'''
-        run_date = f'''**Date of Run**: {run.get('run_date').isoformat()}''' if run.get('run_date') else None
-        comment = f'''**Comment**: {run.get('comment')}\n''' if run.get('comment') else None
-        verifier_obj = run.get('verifier_info')
-        verifier_obj = next(iter(verifier_obj.users.values())) if verifier_obj else {}
-        verifier = '**Verifier**: 'f"{verifier_obj.get('user_name')}" + f" (*{verifier_obj.get('pronouns')}*)" \
-            if verifier_obj.get('pronouns') is not None else f"**Verifier**: {verifier_obj.get('user_name')}" \
-            if verifier_obj.get('user_name') else None
-        status = '**Status**: ' + run.get('status').capitalize() if run.get('status') != 'new' else 'Unverified'
-        reason = '**Reason for Rejection**: ' + run.get('reason') if run.get('reason') else None
-        description = '\n'.join(tuple(value for value in [players, variables_info, run_date, comment, verifier, status, reason] if value))
-
-        video_url = run.get('run_video')
-        profile_picture = next(iter(player_obj.get_value('user_pfp')))
-
-        embed = discord.Embed(title=f'''{game_name} {category_name} in {time}''',
-                              description=description,
-                              url=video_url)
-        embed.set_image(url=profile_picture)
+        embed.set_image(url=embed_attributes.get('profile_picture'))
         await interaction.response.send_message(embed=embed)
     except Exception as error:
         print_exc()
