@@ -8,7 +8,7 @@ import asyncio
 from traceback import print_exc
 from re import findall
 import tables
-import players
+import users
 import speedruncom_integration as src
 from where import WhereCond
 from debounce import Debounce
@@ -16,19 +16,25 @@ from debounce import Debounce
 
 # set up all the adapters and converters for the different types of vars used in tables
 sqlite3.register_adapter(datetime.date, tables.adapt_date_iso)
-sqlite3.register_adapter(players.Players, tables.adapt_players)
+sqlite3.register_adapter(users.Users, tables.adapt_users)
 sqlite3.register_adapter(dict, dumps)
 sqlite3.register_converter('date', tables.convert_date_iso)
-sqlite3.register_converter('players', tables.convert_players)
+sqlite3.register_converter('users', tables.convert_users)
 sqlite3.register_converter('json', loads)
 conn = sqlite3.connect('runs.db', detect_types=sqlite3.PARSE_DECLTYPES)
 conn.row_factory = tables.dict_factory
 
-# create RunTable to handle all cached runs
-runs_table = tables.RunTable(conn)
-
 # creates variables table to handle all variables
 variables_table = tables.VariableTable(conn)
+
+# creates categories to handle all categories
+categories_table = tables.CategoryTable(conn)
+
+# creates user table to handle all users
+user_table = tables.UserTable(conn)
+
+# creates master table to combine all tables into one
+master_table = tables.MasterTable(conn)
 
 # create debounce object
 debounce = Debounce(1)
@@ -56,18 +62,6 @@ def split_message(content):
     return fragments
 
 
-def resync_runs():
-    all_run_rows = []
-    for game_id in config.GAMES:
-        runs = src.parse_runs_into_rows(src.get_all_runs(game_id))
-        all_run_rows.extend(runs)
-    runs_table.resync_table(all_run_rows)
-
-
-def get_all_runs():
-    return runs_table.select_row_col()
-
-
 def resync_variables():
     all_variable_rows = []
     for game_id in config.GAMES:
@@ -76,8 +70,43 @@ def resync_variables():
     variables_table.resync_table(all_variable_rows)
 
 
+def resync_users():
+    all_runs_rows = []
+    for game_id in config.GAMES:
+        runs = src.get_all_runs_users(game_id)
+        all_runs_rows.extend(runs)
+    users_rows = src.parse_runs_into_users_rows(all_runs_rows.copy())
+    user_table.resync_table(src.duplicate_remover(users_rows, 0))
+    return True
+
+
+def resync_categories():
+    all_category_rows = []
+    for game_id in config.GAMES:
+        categories = src.get_all_categories(game_id)
+        all_category_rows.extend(categories)
+    all_category_rows = src.parse_categories_into_rows(all_category_rows.copy())
+    categories_table.resync_table(all_category_rows)
+    return True
+
+
+def resync_master_user():
+    all_runs = []
+    [all_runs.extend(src.get_all_runs_users(game_id)) for game_id in config.GAMES]
+    user_rows = src.parse_runs_into_users_rows(all_runs)
+    user_table.resync_table(user_rows)
+    master_rows = [src.parse_call_into_master_row(run, categories_table, variables_table, user_table) for run in all_runs]
+    master_table.resync_table(master_rows)
+
+
+def resync_all():
+    resync_categories()
+    resync_variables()
+    resync_master_user()
+
+
 def get_master_table():
-    return tables.master_table(conn)
+    return master_table(conn)
 
 
 def get_wr():
@@ -86,53 +115,6 @@ def get_wr():
 
 def get_num_verified(*args):
     pass
-
-
-def get_length_runs(game_id: str = ''):
-    return sum(time.get('igt') for time in runs_table.select_row_col(cols=('igt',)))
-
-
-def get_dates_from_str(string: str):
-    # regex of iso8401 dates is /d/d/d/d-/d/d-/d/d
-    return findall('/d/d/d/d-/d/d-/d/d', string)
-
-
-def create_where_conditions_from_date_str(date_str: str) -> tuple:
-    keyword = date_str.lower().split(' ')[0]
-    normal_keyword_values = {
-        'after': 'date > {}',
-        'before': 'date < {}',
-        'on': 'date = {}',
-        'between': '{} > date;{} < date',
-    }
-    if keyword in normal_keyword_values:
-        dates = get_dates_from_str(date_str)
-        if not dates:
-            raise ValueError('error: date not in correct format')
-        where_cond_tuple = tuple(map(lambda x: x.split(' '), normal_keyword_values[keyword].format(dates).split(';')))
-        where_conds = tuple(WhereCond(cond[0], cond[1], cond[2]) for cond in where_cond_tuple)
-        return where_conds
-    elif keyword == 'last':
-        date = datetime.date.fromisoformat(get_dates_from_str(date_str)[0])
-        num = int(date_str.split(' ')[1])
-        if 'days' in date_str:
-            return (WhereCond('date', '>', date - datetime.timedelta(days=num)),)
-        elif 'weeks' in date_str:
-            return (WhereCond('date', '>', date - datetime.timedelta(weeks=num)),)
-        elif 'months' in date_str:
-            return (WhereCond('date', '>', date - datetime.timedelta(days=num*30)),)
-        elif 'years' in date_str:
-            return (WhereCond('date', '>', date - datetime.timedelta(days=num*365)),)
-        else:
-            raise ValueError('error: date not in correct format')
-    elif keyword == 'year':
-        year = findall('/d/d/d/d', date_str)
-        if not year:
-            raise ValueError('error: date not in correct format')
-        conditions = (f'date >= 01-01-{year}', f'date <= 12-31-{year}')
-        return tuple(WhereCond(cond[0], cond[1], cond[2]) for cond in conditions)
-    else:
-        raise ValueError('error: date not in correct format')
 
 
 @debounce
