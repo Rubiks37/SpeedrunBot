@@ -2,7 +2,7 @@
 
 import sqlite3
 from datetime import date
-import players
+import users
 
 
 # base class for all tables later, contains sql calling logic
@@ -19,7 +19,10 @@ class BaseTable:
     def __call__(self, query, input_row: tuple = tuple()):
         print(query)
         cursor = self.conn.cursor()
-        cursor.execute(query, input_row)
+        try:
+            cursor.execute(query, input_row)
+        except sqlite3.Error as error:
+            raise ValueError('error: could not properly select from table\nquery: ' + query + '\nparams:' + str(input_row) + '\nerror: ' + str(error))
         data = cursor.fetchall()
         cursor.close()
         self.conn.commit()
@@ -53,22 +56,9 @@ class BaseTable:
         VALUES ({', '.join(['?' for _ in self.COLS])}) RETURNING *'''
         return self.executemany(query, rows)
 
-    def select_cols(self, *args):
-        # check if any of the kwarg keys are not valid columns
-        if set(args) - set(self.COLS):
-            raise ValueError('error: keyword not found in table')
-
-        query = f'''SELECT {', '.join(args)} FROM {self.NAME}'''
-        return self(query)
-
-    # args will be raw WhereCond objects
-    def select_row_col(self, cols=(), where_conds=()):
-
-        invalid_args = (set(arg.col for arg in where_conds) - set(self.COLS))
-        invalid_args.update(set(cols) - set(self.COLS))
-
-        if invalid_args:
-            raise ValueError('error: keyword not found in table')
+    # cols is a tuple listing columns you want from the table
+    # where_conds is a set of WhereConds objects that specify the conditions
+    def select_row_col(self, cols: list = None, where_conds: list = None):
 
         if not cols:
             cols = ('*',)
@@ -105,33 +95,6 @@ class BaseTable:
         return True
 
 
-"""
-every run is in this table. the table will look like this:
-run_id - game_id - player - date - rta - igt - category - variable - verifier - verify_date
-run_id is the id of the run (also the primary key)
-game_id is the id of the game the run was done in
-runner is the runners id
-date is the date stored in ISO8601 format
-rta is the real time of the run (for every run)
-igt is the in game time of the run (for runs that dont have an igt, the rta is used)
-category is the id of the category
-variable is the id's of variables - a serialized dictionary (pretty much a json).
-verifier is the verifiers id (if not verified, NULL)
-verify_date is the date that the run was verified in ISO8601 (if not verified NULL)
-the keys are the ids of choices types, the values are ids of the specific choices
-"""
-
-
-class RunTable(BaseTable):
-
-    def __init__(self, conn: sqlite3.Connection):
-        table_cols = ('run_id', 'game_id', 'player', 'date', 'rta', 'igt', 'category', 'variable', 'verifier', 'verify_date')
-        table_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)', 'players', 'date', 'REAL', 'REAL', 'VARCHAR(25)', 'json', 'VARCHAR(25)', 'date')
-        name = 'runs'
-        primary_key = 'run_id'
-        super().__init__(conn, name, table_cols, table_types, primary_key)
-
-
 class VariableTable(BaseTable):
 
     def __init__(self, conn: sqlite3.Connection):
@@ -144,8 +107,8 @@ class VariableTable(BaseTable):
 
 class CategoryTable(BaseTable):
     def __init__(self, conn: sqlite3.Connection):
-        cols = ('category_id', 'name')
-        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)')
+        cols = ('category_id', 'name', 'game_id')
+        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)', 'VARCHAR(25)')
         name = 'categories'
         primary_key = 'category_id'
         super().__init__(conn, name, cols, col_types, primary_key)
@@ -154,21 +117,64 @@ class CategoryTable(BaseTable):
 class UserTable(BaseTable):
 
     def __init__(self, conn: sqlite3.Connection):
-        cols = ('user_id', 'name', 'type')
-        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25), VARCHAR(25)')
+        cols = ('user_id', 'user_name', 'pronouns', 'user_type', 'user_pfp')
+        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)', 'VARCHAR(25)', 'VARCHAR(25)', 'VARCHAR(25)')
         name = 'users'
         primary_key = 'user_id'
         super().__init__(conn, name, cols, col_types, primary_key)
 
 
-# i promise ill make this work by the end of this week, just not right now
-def master_table(conn):
-    query = ''''''
+class MasterTable(BaseTable):
+    def __init__(self, conn: sqlite3.Connection):
+        cols = (
+            'run_id',
+            'game_id',
+            'game_name',
+            'run_date',
+            'player_info',
+            'player_name',
+            'rta',
+            'igt',
+            'category_id',
+            'category_name',
+            'variable_id',
+            'variable_info',
+            'verifier_info',
+            'verifier_name',
+            'verify_date',
+            'status'
+        )
+        col_types = (
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'date',
+            'players',
+            'VARCHAR(25)',
+            'REAL',
+            'REAL',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'json',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'VARCHAR(25)',
+            'date',
+            'VARCHAR(25)'
+        )
+        name = 'runs_master'
+        primary_key = 'run_id'
+        super().__init__(conn, name, cols, col_types, primary_key)
+
+
+def drop_all_tables(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    cursor.execute(query)
-    data = cursor.fetchall()
-    cursor.close()
-    return data
+    names = cursor.execute('SELECT name FROM sqlite_master').fetchall()
+    [cursor.execute(f'DROP TABLE {row_dict.get("name")}') for row_dict in names if not row_dict.get('name').startswith('sqlite')]
+    conn.commit()
+    return
 
 
 # this is for sqlite3 connection to transform rows into dictionaries
@@ -188,10 +194,10 @@ def convert_date_iso(date_iso) -> date or None:
 
 
 # for players
-def adapt_players(players_obj: players.Players) -> str:
+def adapt_users(players_obj: users.Users) -> str:
     return repr(players_obj)
 
 
-def convert_players(players_bytes) -> players.Players:
-    players_str = players_bytes.decode('utf-8')
-    return players.get_players_from_repr(players_str)
+def convert_users(user_bytes) -> users.Users:
+    user_str = user_bytes.decode('utf-8')
+    return users.get_users_from_repr(user_str)
