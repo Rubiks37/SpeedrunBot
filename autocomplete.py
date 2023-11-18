@@ -3,6 +3,8 @@ from discord.app_commands import Choice
 from debounce import Debounce
 import speedruncom_integration as src
 import tables
+from itertools import product
+from config import GAMES
 
 # create debounce object
 debounce = Debounce(1)
@@ -81,3 +83,30 @@ def get_run(master_table: tables.MasterTable):
         return [Choice(name=row[0], value=row[1]) for row in filtered_rows][:25]
 
     return get_run_inner
+
+
+def get_categories(variable_table: tables.VariableTable):
+    async def get_categories_inner(interaction: discord.Interaction, current: str) -> list[Choice[str]]:
+        rows = variable_table(
+            '''SELECT var_name, variable_id, var_values, categories.category_id, categories.name, categories.game_id FROM variables JOIN categories ON variables.category_id = categories.category_id''')
+        categories_dict = {}
+        for row in rows:
+            category_id = row.get('category_id')
+            categories_dict.update({
+                category_id:
+                    {**categories_dict.get(category_id, {}),
+                     row.get('var_name'): tuple(row.get('var_values').values()),
+                     'category_name': row.get('name'),
+                     'game_id': row.get('game_id')}})
+        initial_list = []
+        for values in categories_dict.values():
+            game_id = values.pop('game_id')
+            game_name = GAMES.get(game_id)
+            category_name = values.pop('category_name')
+            all_combos = list(product(*tuple(values.values())))
+            initial_list.extend([(f'''{game_name} - {category_name} ({', '.join(combo)})''', f"{game_name}...{category_name}...{', '.join(combo)}") for combo in all_combos])
+        filtered_list = search_list(current, tuple(initial_list))
+        return [Choice(name=value1, value=value2) for value1, value2 in filtered_list][:25]
+
+    return get_categories_inner
+
