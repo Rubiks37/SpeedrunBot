@@ -127,7 +127,8 @@ def parse_variables_into_rows(variables):
         variable_id = variable.get('id')
         name = variable.get('name')
         values = {key: value.get('label') for key, value in variable.get('values').get('values').items()}
-        rows.append((variable_id, name, values))
+        category_id = variable.get('category')
+        rows.append((variable_id, category_id, name, values))
     return rows
 
 
