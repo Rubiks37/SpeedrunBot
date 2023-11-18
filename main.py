@@ -44,6 +44,7 @@ tree = app_commands.CommandTree(client)
 
 async def sync_commands():
     await tree.sync()
+    await tree.sync(guild=await client.fetch_guild(843315943836614676))
 
 
 def split_message(content):
@@ -102,8 +103,15 @@ def resync_all():
     resync_master_user()
 
 
-def get_wr():
-    pass
+def get_wr(autocomplete_val: str):
+    name, category, variables = autocomplete_val.split('...')
+    name = WhereCond('game_name', '=', name)
+    category = WhereCond('category_name', '=', category)
+    status = WhereCond('status', '=', 'verified')
+    variables = [WhereCond('variable_info', 'LIKE', f"%{variable}%") for variable in variables.split(', ')]
+    row = master_table.select_row_col(cols=['run_id'], where_conds=[name, category, *variables, status], append='ORDER BY igt LIMIT 1')
+    run_id = next(iter(row), {}).get('run_id')
+    return master_table.get_embed_attributes_from_run_id(run_id, ac.format_time)
 
 
 def get_num_verified(*args):
@@ -145,6 +153,22 @@ async def cmd_get_num_verified(interaction: discord.Interaction, date: str = Non
 async def cmd_get_run(interaction: discord.Interaction, run: str):
     try:
         embed_attributes = (master_table.get_embed_attributes_from_run_id(run, ac.format_time))
+        embed = discord.Embed(title=embed_attributes.get('title'),
+                              description=embed_attributes.get('description'),
+                              url=embed_attributes.get('video_url'))
+
+        embed.set_image(url=embed_attributes.get('profile_picture'))
+        await interaction.response.send_message(embed=embed)
+    except Exception as error:
+        print_exc()
+        await interaction.response.send_message(content=error)
+
+
+@tree.command(name='get_wr', description='gets a world record for a specified category')
+@app_commands.autocomplete(run_category=ac.get_categories(variables_table))
+async def cmd_get_wr(interaction: discord.Interaction, run_category: str):
+    try:
+        embed_attributes = get_wr(run_category)
         embed = discord.Embed(title=embed_attributes.get('title'),
                               description=embed_attributes.get('description'),
                               url=embed_attributes.get('video_url'))
