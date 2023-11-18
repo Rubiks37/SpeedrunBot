@@ -4,6 +4,7 @@ from debounce import Debounce
 import speedruncom_integration as src
 import tables
 from itertools import product
+from json import loads, dumps
 from config import GAMES
 
 # create debounce object
@@ -92,19 +93,21 @@ def get_categories(variable_table: tables.VariableTable):
         categories_dict = {}
         for row in rows:
             category_id = row.get('category_id')
-            categories_dict.update({
-                category_id:
-                    {**categories_dict.get(category_id, {}),
-                     row.get('var_name'): tuple(row.get('var_values').values()),
-                     'category_name': row.get('name'),
-                     'game_id': row.get('game_id')}})
+            categories_dict.setdefault(category_id, {}).update({
+                row['var_name']: tuple(row['var_values'].values()),
+                'game_id': row['game_id'],
+                'category_name': row['name']
+            })
         initial_list = []
         for values in categories_dict.values():
             game_id = values.pop('game_id')
             game_name = GAMES.get(game_id)
             category_name = values.pop('category_name')
             all_combos = list(product(*tuple(values.values())))
-            initial_list.extend([(f'''{game_name} - {category_name} ({', '.join(combo)})''', f"{game_name}...{category_name}...{', '.join(combo)}") for combo in all_combos])
+
+            initial_list.extend([(f'''{game_name} - {category_name} ({', '.join(combo)})''',
+                                  dumps([game_name, category_name, combo])) for combo in all_combos])
+
         filtered_list = search_list(current, tuple(initial_list))
         return [Choice(name=value1, value=value2) for value1, value2 in filtered_list][:25]
 

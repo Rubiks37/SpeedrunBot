@@ -104,11 +104,11 @@ def resync_all():
 
 
 def get_wr(autocomplete_val: str):
-    name, category, variables = autocomplete_val.split('...')
+    name, category, variables = loads(autocomplete_val)
     name = WhereCond('game_name', '=', name)
     category = WhereCond('category_name', '=', category)
     status = WhereCond('status', '=', 'verified')
-    variables = [WhereCond('variable_info', 'LIKE', f"%{variable}%") for variable in variables.split(', ')]
+    variables = [WhereCond('variable_info', 'LIKE', f"%{variable}%") for variable in variables.copy()]
     row = master_table.select_row_col(cols=['run_id'], where_conds=[name, category, *variables, status], append='ORDER BY igt LIMIT 1')
     run_id = next(iter(row), {}).get('run_id')
     return master_table.get_embed_attributes_from_run_id(run_id, ac.format_time)
