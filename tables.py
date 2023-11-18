@@ -63,7 +63,7 @@ class BaseTable:
 
     # cols is a tuple listing columns you want from the table
     # where_conds is a set of WhereConds objects that specify the conditions
-    def select_row_col(self, cols: list = None, where_conds: list = None):
+    def select_row_col(self, cols: list = None, where_conds: list = None, append: str = None):
 
         if not cols:
             cols = ['*']
@@ -72,6 +72,8 @@ class BaseTable:
         query = f'''SELECT {', '.join(cols)} FROM {self.NAME}'''
         if conditions:
             query += f''' WHERE {' AND '.join(conditions)}'''
+        if append:
+            query += append
 
         params = tuple(arg.value for arg in where_conds) if where_conds else ()
         return self(query, params)
@@ -116,8 +118,8 @@ class BaseTable:
 class VariableTable(BaseTable):
 
     def __init__(self, conn: sqlite3.Connection):
-        cols = ('variable_id', 'var_name', 'var_values')
-        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)', 'json')
+        cols = ('variable_id', 'category_id', 'var_name', 'var_values')
+        col_types = ('VARCHAR(25) PRIMARY KEY', 'VARCHAR(25)', 'VARCHAR(25)', 'json')
         name = 'variables'
         primary_key = 'variable_id'
         super().__init__(conn, name, cols, col_types, primary_key)
