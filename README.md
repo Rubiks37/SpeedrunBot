@@ -1,5 +1,8 @@
 # SpeedrunBot
 
+NOTICE:
+This project is currently on hold. I am developing an SRC API wrapper in python because I was so frustrated trying to directly interact with the api in this code. When the API wrapper is functional, I plan to rework this entire bot.
+
 ---
 
 A discord bot that uses speedrun.com's API to cache runs from a specified set of games and gets stats from those runs
